@@ -1,4 +1,6 @@
 __pycache__/
 *.pyc
+.venv/
 *.s2k
-!examples/*.s2k
+*.report.md
+salida/

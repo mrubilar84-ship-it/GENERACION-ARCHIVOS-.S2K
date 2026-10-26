@@ -1,0 +1,189 @@
+"""Construcción del modelo desde un IFC: coordenadas locales, secciones, nudos y revisiones.
+
+Pasos:
+1. Leer vigas y columnas (extremos del eje y perfil).
+2. Estimar la rotación de la grilla con la moda de los ángulos de piezas horizontales (mod 90°).
+3. Trasladar y rotar al sistema local; Z = 0 en la cota mínima de la estructura (o la indicada).
+4. Crear secciones por designación y barras entre nudos fusionados.
+5. Dividir barras en nudos interiores y revisar conectividad.
+"""
+
+from __future__ import annotations
+
+import math
+from collections import Counter
+from dataclasses import dataclass, field
+
+from ..model import Issue, Model
+from ..sections import (
+    SectionSpec,
+    check_weight,
+    i_section,
+    section_from_polygon,
+)
+from .reader import IfcMember, read_members
+
+DEFAULT_MATERIAL = "A36"
+
+
+@dataclass
+class Transform:
+    """Rotación alrededor del origen mundo y luego traslación; Z con desplazamiento."""
+
+    angle_deg: float
+    offset: tuple[float, float]
+    z0: float
+
+    def apply(self, p) -> tuple[float, float, float]:
+        a = math.radians(-self.angle_deg)
+        x = p[0] * math.cos(a) - p[1] * math.sin(a) - self.offset[0]
+        y = p[0] * math.sin(a) + p[1] * math.cos(a) - self.offset[1]
+        return x, y, p[2] - self.z0
+
+
+@dataclass
+class BuildReport:
+    source: str
+    info: dict
+    transform: Transform | None = None
+    members: int = 0
+    frames: int = 0
+    nodes: int = 0
+    splits: int = 0
+    joined_ends: int = 0
+    max_join_move: float = 0.0
+    snapped_nodes: int = 0
+    duplicates_removed: list[str] = field(default_factory=list)
+    max_snap_move: float = 0.0
+    skipped: list[str] = field(default_factory=list)
+    sections: dict[str, SectionSpec] = field(default_factory=dict)
+    issues: list[Issue] = field(default_factory=list)
+    candidate_supports: list[int] = field(default_factory=list)
+    materials_in_ifc: Counter = field(default_factory=Counter)
+
+    def to_markdown(self) -> str:
+        t = self.transform
+        out = [f"# Reporte de generación: {self.source}", ""]
+        out += ["## Resumen", ""]
+        out += [f"- Miembros IFC: {self.members} ({', '.join(f'{k}: {v}' for k, v in self.info['classes'].items())})",
+                f"- Origen del eje: {', '.join(f'{k}: {v}' for k, v in self.info['axis_sources'].items())}",
+                f"- Extremos llevados al eje de otra barra: {self.joined_ends} "
+                f"(desplazamiento máximo {self.max_join_move * 1000:.1f} mm)",
+                f"- Nudos ajustados sobre el eje de otra barra: {self.snapped_nodes} "
+                f"(desplazamiento máximo {self.max_snap_move * 1000:.1f} mm)",
+                f"- Barras en el modelo: {self.frames}",
+                f"- Nudos: {self.nodes}",
+                f"- Barras divididas en nudos interiores: {self.splits}",
+                f"- Escala de unidades IFC: {self.info['length_scale']} m por unidad",
+                ""]
+        if t:
+            out += ["## Transformación a coordenadas locales", "",
+                    f"- Rotación de la grilla: {t.angle_deg:.3f}°",
+                    f"- Traslación (ejes rotados): x={t.offset[0]:.3f} m, y={t.offset[1]:.3f} m",
+                    f"- Cota Z = 0: {t.z0:.3f} m (coordenada mundo)", ""]
+        out += ["## Secciones", "", "| Sección | Forma SAP | A (m²) | kg/m calc. | kg/m designación | Observaciones |",
+                "|---|---|---|---|---|---|"]
+        for s in self.sections.values():
+            a = f"{s.area:.6f}" if s.area else "SAP calcula"
+            w = f"{s.weight_kg_per_m:.2f}" if s.weight_kg_per_m else "—"
+            obs = "; ".join(s.warnings) or "ok"
+            out.append(f"| {s.name} | {s.shape} | {a} | {w} | {s.kg_per_m or '—'} | {obs} |")
+        out += [""]
+        out += ["## Materiales encontrados en el IFC", ""]
+        out += [f"- {name or '(sin material)'}: {n} miembro(s)" for name, n in self.materials_in_ifc.items()]
+        out += ["", f"Todos se asignan a `{DEFAULT_MATERIAL}` (única definición disponible).", ""]
+        if self.duplicates_removed:
+            out += ["## Barras duplicadas eliminadas", ""]
+            out += [f"- GUID {g} (ya existía una barra entre los mismos nudos)" for g in self.duplicates_removed]
+            out += [""]
+        if self.skipped:
+            out += ["## Miembros omitidos", ""] + [f"- {s}" for s in self.skipped] + [""]
+        out += ["## Revisiones de conectividad", ""]
+        if not self.issues:
+            out += ["Sin observaciones."]
+        for i in self.issues:
+            out += [f"- **{i.severity.upper()}** `{i.code}`: {i.message}"]
+        out += ["", "## Apoyos", ""]
+        out += [f"Nudos en la cota mínima (candidatos a apoyo, no asignados): {len(self.candidate_supports)}"]
+        out += [""]
+        return "\n".join(out)
+
+
+def build(path: str, *, angle_deg: float | None = None, offset: tuple[float, float] | None = None,
+          z0: float | None = None, snap_tol: float = 0.01, near_tol: float = 0.10,
+          join_radius: float = 0.15, frame_tol: float = 0.02,
+          title: str | None = None) -> tuple[Model, BuildReport]:
+    members, info = read_members(path)
+    report = BuildReport(source=title or path, info=info, members=len(members))
+    report.materials_in_ifc.update(m.material or "" for m in members)
+
+    angle = _grid_angle(members) if angle_deg is None else angle_deg
+    rotated = [_rotate(m.p0, angle) for m in members] + [_rotate(m.p1, angle) for m in members]
+    if offset is None:
+        offset = (min(p[0] for p in rotated), min(p[1] for p in rotated))
+    if z0 is None:
+        z0 = min(min(m.p0[2], m.p1[2]) for m in members)
+    tr = Transform(angle, offset, z0)
+    report.transform = tr
+
+    model = Model(snap_tol=snap_tol, near_tol=near_tol)
+    spec_by_key: dict[str, SectionSpec | None] = {}
+    for m in members:
+        a, b = tr.apply(m.p0), tr.apply(m.p1)
+        key = m.designation or m.type_name
+        if key not in spec_by_key:
+            spec_by_key[key] = _section_for(m, key, report)
+        spec = spec_by_key[key]
+        if spec is None:
+            report.skipped.append(f"{m.ifc_class} {m.guid} ({m.type_name}): perfil no reconocido")
+            continue
+        model.add_section(spec)
+        i = model.node(*a)
+        j = model.node(*b)
+        if model.add_frame(i, j, spec.name, m.guid) is None:
+            report.skipped.append(f"{m.ifc_class} {m.guid} ({m.type_name}): longitud cero tras fusionar nudos")
+
+    report.splits = model.split_at_nodes()
+    report.joined_ends, report.max_join_move = model.attach_free_ends(join_radius)
+    report.snapped_nodes, report.max_snap_move = model.snap_nodes_to_frames(frame_tol)
+    report.duplicates_removed = model.remove_duplicate_frames()
+    report.frames = len(model.frames)
+    report.nodes = len(model.nodes)
+    report.issues = model.checks()
+    report.candidate_supports = model.nodes_at_lowest_level()
+    report.sections = {s.name: s for s in model.sections.values()}
+    return model, report
+
+
+def _section_for(m: IfcMember, key: str, report: BuildReport) -> SectionSpec | None:
+    if m.profile is None:
+        return None
+    name = key
+    if m.profile.kind == "I":
+        d = m.profile.dims
+        spec = i_section(name, d["d"], d["b"], d["tf"], d["tw"], designation=m.designation)
+    else:
+        spec = section_from_polygon(name, m.profile.rings, designation=m.designation)
+    check_weight(spec, m.kg_per_m)
+    spec.material = DEFAULT_MATERIAL
+    return spec
+
+
+def _grid_angle(members: list[IfcMember]) -> float:
+    """Ángulo de la grilla: moda de las direcciones de piezas horizontales, en [-45°, 45°)."""
+    angles = []
+    for m in members:
+        dx, dy, dz = (m.p1[k] - m.p0[k] for k in range(3))
+        length = math.hypot(dx, dy)
+        if length > 1.0 and abs(dz) < 0.01:
+            a = math.degrees(math.atan2(dy, dx)) % 90
+            angles.append(round(a, 1))
+    if not angles:
+        return 0.0
+    mode = Counter(angles).most_common(1)[0][0]
+    return ((mode + 45) % 90) - 45
+
+
+def _rotate(p, angle_deg: float):
+    a = math.radians(-angle_deg)
+    return (p[0] * math.cos(a) - p[1] * math.sin(a), p[0] * math.sin(a) + p[1] * math.cos(a), p[2])
