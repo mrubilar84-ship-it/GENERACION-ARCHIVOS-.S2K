@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+*.s2k
+!examples/*.s2k
