@@ -21,6 +21,10 @@ Opciones principales:
 | `--snap-frame` | 0,02 m | Distancia para llevar un nudo al eje de otra barra. |
 | `--join` | 0,15 m | Alcance para conectar un extremo libre (más la semialtura de la pieza receptora). |
 | `--near` | 0,10 m | Distancia para avisar nudos cercanos sin fusionar. |
+| `--grid-step` | 0,10 m | Paso de la grilla en planta; cada espaciamiento se redondea a este paso. `0` desactiva la grilla. |
+| `--z-step` | 0,05 m | Paso de los niveles Z. |
+| `--grid-tol` | 0,10 m | Distancia máxima para ajustar un extremo a una línea de grilla (planta). |
+| `--z-tol` | 0,10 m | Distancia máxima para ajustar un extremo a un nivel. |
 
 El comando devuelve código 1 si hay errores de conectividad.
 
@@ -33,24 +37,33 @@ El comando devuelve código 1 si hay errores de conectividad.
    - Ángulos L por geometría.
    - Resto como `General`.
    - Cada sección se compara con el peso de su designación (±1 %).
-3. **Nudos** (`s2k/model.py`):
+3. **Grilla** (`s2k/grid.py`): las líneas X, Y y niveles Z se detectan agrupando los extremos de las piezas
+   primarias (HN, IN, IE; los arriostramientos no definen ejes). Cada espaciamiento medido se redondea al
+   paso (p. ej. 5,05 → 5,10 con paso 0,10) y los extremos a menos de la tolerancia se llevan a la línea regular.
+   Una línea necesita al menos 4 extremos de apoyo.
+4. **Nudos** (`s2k/model.py`):
    - Fusión de nudos a menos de la tolerancia.
    - Extremos libres llevados al eje de otra barra no paralela.
    - Nudos a 2 cm del eje de otra barra movidos sobre ese eje.
    - Barras divididas en nudos interiores (p. ej. viga que pasa por una columna).
    - Barras duplicadas eliminadas.
-4. **Revisiones** (reporte): nudos desconectados, componentes separadas, barras que se cruzan sin nudo, nudos cercanos sin fusionar, barras duplicadas y de longitud cero, apoyos inválidos.
-5. **Escritura** (`s2k/writer.py`): CRLF, tablas con el formato verificado en archivos exportados por SAP2000 v23.3.1.
+5. **Revisiones** (reporte): nudos desconectados, componentes separadas, barras que se cruzan sin nudo, nudos cercanos sin fusionar, barras duplicadas y de longitud cero, apoyos inválidos.
+6. **Escritura** (`s2k/writer.py`): CRLF, tablas con el formato verificado en archivos exportados por SAP2000 v23.3.1.
 
 ## Resultado con el IFC de referencia (CMZ-5746)
 
 - 94 miembros (80 vigas, 14 columnas): 80 con eje IFC, 14 columnas por envolvente.
-- 188 barras, 130 nudos, 5 secciones (HN30x92.2, HN25x42.4, L10x8.96, XL16x11.92, IN20x16.8).
+- Grilla regular detectada:
+  - X cada 3,00 m (0 a 18 m).
+  - Y en 0,00 y 5,10 m (la distancia medida de 5,105 m se cierra a 5,10).
+  - Niveles Z en 0,00; 5,60; 5,75 y 7,90 m.
+  - Diferencias respecto de la medición: menos de 1 mm en X, hasta 25 mm en Y y hasta 18 mm en Z.
+- 190 barras, 118 nudos y 5 secciones (HN30x92.2, HN25x42.4, L10x8.96, XL16x11.92, IN20x16.8).
 - Pesos calculados contra designación: todos dentro de ±1 %.
 - Revisiones:
   - 1 viga sin ningún elemento conectado (error).
-  - 1 cruce de riostra con viga a 15 mm de la esquina, sin nudo (advertencia).
-  - 28 pares de nudos a 1–9 cm sin fusionar (advertencia; suelen ser excentricidades de unión a decidir por el ingeniero).
+  - 2 cruces de barras sin nudo común (advertencia).
+  - 9 pares de nudos a 3–9 cm sin fusionar, en su mayoría excentricidades de unión (advertencia).
 
 ## Pruebas
 
@@ -70,3 +83,7 @@ S2K_TEST_IFC=/ruta/archivo.ifc python -m unittest discover -s tests -t .   # inc
 - **Apoyos**: no se asignan; el reporte lista los nudos de cota mínima como candidatos.
 - **Cargas**: no se generan todavía.
 - **Coordenadas**: se rota la grilla por la moda de las vigas horizontales; conviene confirmar el origen y la rotación.
+- **Grilla**: se deduce de la estructura, no de un plano. Confirma los espaciamientos contra las cotas del plano;
+  el origen queda en la primera línea detectada (aquí Y = 0,02 m pasa a 0,00 m).
+- **Niveles Z**: con paso de 5 cm, algunas cotas de piso se redondean a 2–2,5 cm de su medida. Usa `--z-step 0.01`
+  si necesitas las cotas casi exactas.

@@ -14,8 +14,10 @@ import math
 from collections import Counter
 from dataclasses import dataclass, field
 
+from ..grid import Grid, SnapStats, detect_grid, snap_point
 from ..model import Issue, Model
 from ..sections import (
+    family_of,
     SectionSpec,
     check_weight,
     i_section,
@@ -54,6 +56,8 @@ class BuildReport:
     max_join_move: float = 0.0
     snapped_nodes: int = 0
     duplicates_removed: list[str] = field(default_factory=list)
+    grid: Grid | None = None
+    grid_stats: SnapStats | None = None
     max_snap_move: float = 0.0
     skipped: list[str] = field(default_factory=list)
     sections: dict[str, SectionSpec] = field(default_factory=dict)
@@ -81,6 +85,21 @@ class BuildReport:
                     f"- Rotación de la grilla: {t.angle_deg:.3f}°",
                     f"- Traslación (ejes rotados): x={t.offset[0]:.3f} m, y={t.offset[1]:.3f} m",
                     f"- Cota Z = 0: {t.z0:.3f} m (coordenada mundo)", ""]
+        if self.grid is not None:
+            out += ["## Grilla regular", ""]
+            out += [f"Paso en planta: {self.grid.step_xy} m; paso en Z: {self.grid.step_z} m. "
+                    f"Tolerancia de ajuste: {self.grid.tol_xy} m en planta, {self.grid.tol_z} m en Z.", ""]
+            out += ["| Eje | Medido (m) | Regular (m) | Diferencia (mm) | Extremos que la respaldan |",
+                    "|---|---|---|---|---|"]
+            for kind, axes in (("X", self.grid.x), ("Y", self.grid.y), ("Z", self.grid.z)):
+                for k, a in enumerate(axes, 1):
+                    out.append(f"| {kind}{k} | {a.measured:.3f} | {a.value:.3f} | "
+                               f"{(a.value - a.measured) * 1000:+.1f} | {a.support} |")
+            out += [""]
+            if self.grid_stats is not None:
+                out += [f"Coordenadas de extremos ajustadas: {self.grid_stats.coordinates} "
+                        f"(desplazamiento máximo {self.grid_stats.max_move * 1000:.1f} mm); "
+                        f"fuera de tolerancia: {self.grid_stats.unchanged}", ""]
         out += ["## Secciones", "", "| Sección | Forma SAP | A (m²) | kg/m calc. | kg/m designación | Observaciones |",
                 "|---|---|---|---|---|---|"]
         for s in self.sections.values():
@@ -112,7 +131,8 @@ class BuildReport:
 def build(path: str, *, angle_deg: float | None = None, offset: tuple[float, float] | None = None,
           z0: float | None = None, snap_tol: float = 0.01, near_tol: float = 0.10,
           join_radius: float = 0.15, frame_tol: float = 0.02,
-          title: str | None = None) -> tuple[Model, BuildReport]:
+          grid_step: float | None = 0.10, z_step: float = 0.05, grid_tol: float = 0.10,
+          z_tol: float = 0.10, title: str | None = None) -> tuple[Model, BuildReport]:
     members, info = read_members(path)
     report = BuildReport(source=title or path, info=info, members=len(members))
     report.materials_in_ifc.update(m.material or "" for m in members)
@@ -126,10 +146,19 @@ def build(path: str, *, angle_deg: float | None = None, offset: tuple[float, flo
     tr = Transform(angle, offset, z0)
     report.transform = tr
 
+    segments = [(tr.apply(m.p0), tr.apply(m.p1)) for m in members]
+    if grid_step:
+        # La grilla sale de piezas primarias (HN, IN, IE); los arriostramientos no definen ejes.
+        points = [p for m, seg in zip(members, segments) if _is_primary(m) for p in seg]
+        grid = detect_grid(points, grid_step, z_step, tol_xy=grid_tol, tol_z=z_tol)
+        stats = SnapStats()
+        segments = [(snap_point(a, grid, stats), snap_point(b, grid, stats)) for a, b in segments]
+        report.grid = grid
+        report.grid_stats = stats
+
     model = Model(snap_tol=snap_tol, near_tol=near_tol)
     spec_by_key: dict[str, SectionSpec | None] = {}
-    for m in members:
-        a, b = tr.apply(m.p0), tr.apply(m.p1)
+    for m, (a, b) in zip(members, segments):
         key = m.designation or m.type_name
         if key not in spec_by_key:
             spec_by_key[key] = _section_for(m, key, report)
@@ -153,6 +182,10 @@ def build(path: str, *, angle_deg: float | None = None, offset: tuple[float, flo
     report.candidate_supports = model.nodes_at_lowest_level()
     report.sections = {s.name: s for s in model.sections.values()}
     return model, report
+
+
+def _is_primary(m: IfcMember) -> bool:
+    return bool(m.designation) and family_of(m.designation) in ("HN", "IN", "IE")
 
 
 def _section_for(m: IfcMember, key: str, report: BuildReport) -> SectionSpec | None:

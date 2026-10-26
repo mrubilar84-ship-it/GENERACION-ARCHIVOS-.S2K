@@ -42,6 +42,12 @@ class CmzIfcTests(unittest.TestCase):
         errors = [i for i in self.report.issues if i.severity == "error"]
         self.assertTrue(all(i.code == "COMPONENTES_SEPARADOS" for i in errors), errors)
 
+    def test_regular_grid_is_detected(self):
+        xs = [a.value for a in self.report.grid.x]
+        ys = [a.value for a in self.report.grid.y]
+        self.assertEqual(xs, [0.0, 3.0, 6.0, 9.0, 12.0, 15.0, 18.0])
+        self.assertEqual(ys, [0.0, 5.1])
+
     def test_no_duplicate_frames_left(self):
         keys = Counter(tuple(sorted((f.i, f.j))) for f in self.model.frames.values())
         self.assertTrue(all(v == 1 for v in keys.values()))

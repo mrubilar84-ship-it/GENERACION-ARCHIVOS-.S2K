@@ -24,6 +24,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="radio para llevar extremos al eje de otra barra no paralela, m (default 0.15)")
     p.add_argument("--snap-frame", type=float, default=0.02,
                    help="distancia para ajustar un nudo sobre el eje de otra barra, m (default 0.02)")
+    p.add_argument("--grid-step", type=float, default=0.10,
+                   help="paso de la grilla en planta, m; cada espaciamiento se redondea a este paso (0 = sin grilla)")
+    p.add_argument("--z-step", type=float, default=0.05, help="paso de los niveles Z, m (default 0.05)")
+    p.add_argument("--grid-tol", type=float, default=0.10, help="distancia máxima para ajustar a la grilla en planta, m")
+    p.add_argument("--z-tol", type=float, default=0.10, help="distancia máxima para ajustar a un nivel, m")
     args = p.parse_args(argv)
 
     ifc_path = Path(args.ifc)
@@ -32,7 +37,9 @@ def main(argv: list[str] | None = None) -> int:
 
     model, report = build(
         str(ifc_path), angle_deg=args.angle, offset=tuple(args.offset) if args.offset else None,
-        z0=args.z0, snap_tol=args.snap, near_tol=args.near, join_radius=args.join, frame_tol=args.snap_frame, title=ifc_path.name,
+        z0=args.z0, snap_tol=args.snap, near_tol=args.near, join_radius=args.join, frame_tol=args.snap_frame,
+        grid_step=args.grid_step or None, z_step=args.z_step, grid_tol=args.grid_tol, z_tol=args.z_tol,
+        title=ifc_path.name,
     )
     write(model, out)
     report_path.write_text(report.to_markdown(), encoding="utf-8")
