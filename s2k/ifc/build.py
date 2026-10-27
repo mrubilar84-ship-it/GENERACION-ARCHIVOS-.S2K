@@ -156,7 +156,11 @@ def build(path: str, *, angle_deg: float | None = None, offset: tuple[float, flo
         points = [p for m, seg in zip(members, segments) if _is_primary(m) for p in seg]
         grid = detect_grid(points, grid_step, z_step, tol_xy=grid_tol, tol_z=z_tol)
         stats = SnapStats()
-        segments = [(snap_point(a, grid, stats), snap_point(b, grid, stats)) for a, b in segments]
+        # Solo piezas primarias se llevan a la grilla; riostras y cartelas conservan su geometría del IFC.
+        segments = [
+            (snap_point(a, grid, stats), snap_point(b, grid, stats)) if _is_primary(m) else (a, b)
+            for m, (a, b) in zip(members, segments)
+        ]
         report.grid = grid
         report.grid_stats = stats
 
