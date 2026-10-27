@@ -37,6 +37,13 @@ class WriterTests(unittest.TestCase):
     def test_restraint_written(self):
         self.assertIn("Joint=1   U1=Yes   U2=Yes   U3=Yes   R1=Yes   R2=Yes   R3=Yes", self.text)
 
+    def test_local_axes_angle_written_only_when_nonzero(self):
+        self.m.frames[2].angle = 180.0
+        text = render(self.m)
+        self.assertIn('TABLE:  "FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL"', text)
+        self.assertIn("Frame=2   Angle=180   AdvanceAxes=No", text)
+        self.assertNotIn("Frame=1   Angle=", text)
+
     def test_unknown_material_is_rejected(self):
         self.m.sections["HN30x92.2"].material = "XX"
         with self.assertRaises(ValueError):

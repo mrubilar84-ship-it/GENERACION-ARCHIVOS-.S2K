@@ -101,6 +101,9 @@ def render(model: Model, title: str = "generado desde IFC con s2k") -> str:
                            DesignSect=f.section, MatProp="Default"))
     lines += _table("CONNECTIVITY - FRAME", conn)
     lines += _table("FRAME SECTION ASSIGNMENTS", assign)
+    lines += _table("FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL", [
+        _rec(Frame=label, Angle=f.angle, AdvanceAxes=False)
+        for label, f in model.frames.items() if f.angle])
 
     lines += _table("JOINT RESTRAINT ASSIGNMENTS", [
         _rec(Joint=n, **{d: bool(v) for d, v in zip(DOFS, dofs)}) for n, dofs in model.restraints.items()])

@@ -177,10 +177,7 @@ def _try_i_shape(rings, tol: float = 0.03):
     Depth d = dimensión mayor de la caja envolvente; el eje fuerte es el de mayor inercia principal.
     """
     pts = _flat(rings)
-    xs = [x for x, _ in pts]
-    ys = [y for _, y in pts]
-    W, H = max(xs) - min(xs), max(ys) - min(ys)
-    d, b = max(W, H), min(W, H)
+    d, b = _min_box(pts)
     P = polygon_properties(rings)
     A, I_strong = P["A"], P["I1"]
     best = None
@@ -202,12 +199,26 @@ def _try_i_shape(rings, tol: float = 0.03):
     return d, b, tf, tw
 
 
+def _min_box(pts) -> tuple[float, float]:
+    """Dimensiones de la caja alineada con el borde más largo del contorno.
+
+    Un L o un I tienen sus alas o patines como bordes rectos largos; alinear la caja con ellos da
+    las dimensiones reales sin importar cómo venga girada la sección en el IFC.
+    """
+    n = len(pts)
+    best = max(range(n), key=lambda k: math.dist(pts[k], pts[(k + 1) % n]))
+    (x0, y0), (x1, y1) = pts[best], pts[(best + 1) % n]
+    a = -math.atan2(y1 - y0, x1 - x0)
+    c, s_ = math.cos(a), math.sin(a)
+    xs = [c * x - s_ * y for x, y in pts]
+    ys = [s_ * x + c * y for x, y in pts]
+    w, h = max(xs) - min(xs), max(ys) - min(ys)
+    return max(w, h), min(w, h)
+
+
 def _try_angle(rings):
-    """Ángulo de lados rectos: area = (W + H - t) * t, con W, H las dimensiones de la caja envolvente."""
-    pts = _flat(rings)
-    xs = [x for x, _ in pts]
-    ys = [y for _, y in pts]
-    W, H = max(xs) - min(xs), max(ys) - min(ys)
+    """Ángulo de lados rectos: area = (W + H - t) * t, con W, H las dimensiones de la caja alineada con el borde recto más largo."""
+    W, H = _min_box(_flat(rings))
     A = polygon_properties(rings)["A"]
     disc = (W + H) ** 2 - 4 * A
     if disc < 0:

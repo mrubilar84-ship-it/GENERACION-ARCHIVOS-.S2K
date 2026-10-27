@@ -17,7 +17,11 @@ from dataclasses import dataclass, field
 from ..grid import Grid, SnapStats, detect_grid, snap_point
 from ..model import Issue, Model
 from ..sections import (
+    STEEL_KG_PER_M3,
+    angle_section,
     family_of,
+    polygon_properties,
+    _try_angle,
     SectionSpec,
     check_weight,
     i_section,
@@ -157,20 +161,21 @@ def build(path: str, *, angle_deg: float | None = None, offset: tuple[float, flo
         report.grid_stats = stats
 
     model = Model(snap_tol=snap_tol, near_tol=near_tol)
-    spec_by_key: dict[str, SectionSpec | None] = {}
+    parts_by_key: dict[str, list[tuple[SectionSpec, float]] | None] = {}
     for m, (a, b) in zip(members, segments):
         key = m.designation or m.type_name
-        if key not in spec_by_key:
-            spec_by_key[key] = _section_for(m, key, report)
-        spec = spec_by_key[key]
-        if spec is None:
+        if key not in parts_by_key:
+            parts_by_key[key] = _section_parts(m, key, report)
+        parts = parts_by_key[key]
+        if parts is None:
             report.skipped.append(f"{m.ifc_class} {m.guid} ({m.type_name}): perfil no reconocido")
             continue
-        model.add_section(spec)
         i = model.node(*a)
         j = model.node(*b)
-        if model.add_frame(i, j, spec.name, m.guid) is None:
-            report.skipped.append(f"{m.ifc_class} {m.guid} ({m.type_name}): longitud cero tras fusionar nudos")
+        for spec, angle in parts:
+            model.add_section(spec)
+            if model.add_frame(i, j, spec.name, m.guid, angle) is None:
+                report.skipped.append(f"{m.ifc_class} {m.guid} ({m.type_name}): longitud cero tras fusionar nudos")
 
     report.splits = model.split_at_nodes()
     report.joined_ends, report.max_join_move = model.attach_free_ends(join_radius)
@@ -186,6 +191,50 @@ def build(path: str, *, angle_deg: float | None = None, offset: tuple[float, flo
 
 def _is_primary(m: IfcMember) -> bool:
     return bool(m.designation) and family_of(m.designation) in ("HN", "IN", "IE")
+
+
+def _section_parts(m: IfcMember, key: str, report: BuildReport) -> list[tuple[SectionSpec, float]] | None:
+    """Secciones y ángulo local de cada barra que representa al miembro.
+
+    Un XL (dos ángulos en cruz) se modela como dos barras de ángulo sobre los mismos nudos, cada una con
+    su orientación; así SAP la dibuja como dos L y no como una plancha.
+    """
+    if m.designation and family_of(m.designation) == "XL" and m.profile is not None \
+            and m.profile.kind == "contorno" and len(m.profile.rings) == 2:
+        parts = _xl_angles(m)
+        if parts is not None:
+            return parts
+    spec = _section_for(m, key, report)
+    return None if spec is None else [(spec, 0.0)]
+
+
+def _xl_angles(m: IfcMember) -> list[tuple[SectionSpec, float]] | None:
+    """Cada contorno de la XL es un ángulo; el segundo gira respecto del primero según su vértice principal."""
+    parts: list[tuple[SectionSpec, float]] = []
+    specs: dict[str, SectionSpec] = {}  # dos ángulos iguales comparten la misma sección
+    ref = _corner_angle(m.profile.rings[0])
+    for ring in m.profile.rings:
+        dims = _try_angle([ring])
+        if dims is None:
+            return None
+        height, width, t = dims
+        name = f"L{height * 1000:.0f}x{width * 1000:.0f}x{t * 1000:.0f}"
+        if name not in specs:
+            specs[name] = angle_section(name, height, width, t, designation=name)
+            specs[name].material = DEFAULT_MATERIAL
+        parts.append((specs[name], round((_corner_angle(ring) - ref) % 360, 1)))
+    total = sum((s.dims["t3"] + s.dims["t2"] - s.dims["tf"]) * s.dims["tf"] * STEEL_KG_PER_M3 for s, _ in parts)
+    if m.kg_per_m and abs(total - m.kg_per_m) / m.kg_per_m > 0.01:
+        parts[0][0].warnings.append(f"XL: peso de los dos ángulos {total:.2f} kg/m vs designación {m.kg_per_m} kg/m")
+    return parts
+
+
+def _corner_angle(ring) -> float:
+    """Dirección del vértice más alejado del centroide, en grados."""
+    pts, _ = ring
+    P = polygon_properties([ring])
+    far = max(pts, key=lambda p: math.dist(p, (P["cx"], P["cy"])))
+    return math.degrees(math.atan2(far[1] - P["cy"], far[0] - P["cx"]))
 
 
 def _section_for(m: IfcMember, key: str, report: BuildReport) -> SectionSpec | None:

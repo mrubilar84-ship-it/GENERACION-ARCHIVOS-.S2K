@@ -23,6 +23,7 @@ class Frame:
     j: int
     section: str
     source: str = ""  # GlobalId del elemento IFC de origen
+    angle: float = 0.0  # rotación del eje local alrededor de la barra, grados
 
 
 @dataclass
@@ -59,14 +60,14 @@ class Model:
             raise ValueError(f"Sección duplicada con distinto contenido: {spec.name}")
         self.sections[spec.name] = spec
 
-    def add_frame(self, i: int, j: int, section: str, source: str = "") -> int | None:
+    def add_frame(self, i: int, j: int, section: str, source: str = "", angle: float = 0.0) -> int | None:
         """Agrega una barra. Devuelve None si es de longitud cero (no se agrega)."""
         if i == j or math.dist(self.nodes[i], self.nodes[j]) <= self.snap_tol:
             return None
         if section not in self.sections:
             raise ValueError(f"Sección no definida: {section}")
         label = max(self.frames, default=0) + 1
-        self.frames[label] = Frame(label, i, j, section, source)
+        self.frames[label] = Frame(label, i, j, section, source, angle)
         return label
 
     def restrain(self, node: int, dofs: tuple[bool, ...] = (True,) * 6) -> None:
@@ -95,8 +96,8 @@ class Model:
                         continue
                     if _on_segment(p, a, b, self.snap_tol):
                         del self.frames[label]
-                        self.add_frame(f.i, nid, f.section, f.source)
-                        self.add_frame(nid, f.j, f.section, f.source)
+                        self.add_frame(f.i, nid, f.section, f.source, f.angle)
+                        self.add_frame(nid, f.j, f.section, f.source, f.angle)
                         splits += 1
                         changed = True
                         break
@@ -135,7 +136,7 @@ class Model:
                     if new in (n, other):  # evita barras de longitud cero
                         continue
                     f = self.frames[label] = Frame(label, new if end == "i" else f.i,
-                                                   new if end == "j" else f.j, f.section, f.source)
+                                                   new if end == "j" else f.j, f.section, f.source, f.angle)
                     degree[n] -= 1
                     degree[new] += 1
                     moved += 1
@@ -182,11 +183,11 @@ class Model:
 
         Conserva la primera. Devuelve los GUID de origen de las barras eliminadas.
         """
-        seen: dict[tuple[int, int], int] = {}
+        seen: dict[tuple, int] = {}
         removed: list[str] = []
         for label in sorted(self.frames):
             f = self.frames[label]
-            key = (min(f.i, f.j), max(f.i, f.j))
+            key = (min(f.i, f.j), max(f.i, f.j), f.section, f.angle)
             if key in seen:
                 removed.append(f.source)
                 del self.frames[label]
@@ -209,7 +210,7 @@ class Model:
         if not keep:
             return
         for label, f in list(self.frames.items()):
-            self.frames[label] = Frame(label, keep.get(f.i, f.i), keep.get(f.j, f.j), f.section, f.source)
+            self.frames[label] = Frame(label, keep.get(f.i, f.i), keep.get(f.j, f.j), f.section, f.source, f.angle)
         for m in keep:
             self.restraints.pop(m, None)
         self._prune_nodes()
@@ -248,7 +249,7 @@ class Model:
 
     def _renumber(self) -> None:
         ordered = sorted(self.frames.values(), key=lambda f: f.label)
-        self.frames = {k + 1: Frame(k + 1, f.i, f.j, f.section, f.source) for k, f in enumerate(ordered)}
+        self.frames = {k + 1: Frame(k + 1, f.i, f.j, f.section, f.source, f.angle) for k, f in enumerate(ordered)}
         self._prune_nodes()
 
     def components(self) -> list[set[int]]:
@@ -293,7 +294,7 @@ class Model:
                                 f"{len(comps)} componentes conectadas (tamaños de nudos {sizes}); "
                                 "revisar si la estructura realmente está separada o faltan elementos"))
 
-        keys = [tuple(sorted((f.i, f.j))) for f in self.frames.values()]
+        keys = [(tuple(sorted((f.i, f.j))), f.section, f.angle) for f in self.frames.values()]
         dups = len(keys) - len(set(keys))
         if dups:
             issues.append(Issue("error", "BARRA_DUPLICADA", f"{dups} barra(s) duplicada(s)"))

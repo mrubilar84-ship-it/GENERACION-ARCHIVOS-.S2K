@@ -26,7 +26,7 @@ class CmzIfcTests(unittest.TestCase):
 
     def test_sections_match_designations(self):
         names = set(self.report.sections)
-        self.assertTrue({"HN30x92.2", "HN25x42.4", "L10x8.96", "XL16x11.92", "IN20x16.8"} <= names)
+        self.assertTrue({"HN30x92.2", "HN25x42.4", "L10x8.96", "L80x80x5", "IN20x16.8"} <= names)
         for s in self.report.sections.values():
             weight_warnings = [w for w in s.warnings if w.startswith("peso")]
             self.assertEqual(weight_warnings, [], s.name)
@@ -48,8 +48,16 @@ class CmzIfcTests(unittest.TestCase):
         self.assertEqual(xs, [0.0, 3.0, 6.0, 9.0, 12.0, 15.0, 18.0])
         self.assertEqual(ys, [0.0, 5.1])
 
+    def test_xl_members_are_two_angles_at_180_degrees(self):
+        sections = {f.section for f in self.model.frames.values()}
+        self.assertIn("L80x80x5", sections)
+        self.assertNotIn("XL16x11.92", sections)
+        xl_angles = Counter(f.angle for f in self.model.frames.values() if f.section == "L80x80x5")
+        self.assertEqual(set(xl_angles), {0.0, 180.0})
+        self.assertEqual(xl_angles[0.0], xl_angles[180.0])
+
     def test_no_duplicate_frames_left(self):
-        keys = Counter(tuple(sorted((f.i, f.j))) for f in self.model.frames.values())
+        keys = Counter((tuple(sorted((f.i, f.j))), f.section, f.angle) for f in self.model.frames.values())
         self.assertTrue(all(v == 1 for v in keys.values()))
 
 
