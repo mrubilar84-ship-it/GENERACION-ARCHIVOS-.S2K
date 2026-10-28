@@ -48,13 +48,13 @@ class CmzIfcTests(unittest.TestCase):
         self.assertEqual(xs, [0.0, 3.0, 6.0, 9.0, 12.0, 15.0, 18.0])
         self.assertEqual(ys, [0.0, 5.1])
 
-    def test_xl_members_are_two_angles_at_180_degrees(self):
+    def test_xl_members_are_single_l_without_duplicates(self):
         sections = {f.section for f in self.model.frames.values()}
         self.assertIn("L80x80x5", sections)
         self.assertNotIn("XL16x11.92", sections)
-        xl_angles = Counter(f.angle for f in self.model.frames.values() if f.section == "L80x80x5")
-        self.assertEqual(set(xl_angles), {0.0, 180.0})
-        self.assertEqual(xl_angles[0.0], xl_angles[180.0])
+        xl_frames = [f for f in self.model.frames.values() if f.section == "L80x80x5"]
+        self.assertEqual({f.angle for f in xl_frames}, {0.0})
+        self.assertEqual(len({(min(f.i, f.j), max(f.i, f.j)) for f in xl_frames}), len(xl_frames))
 
     def test_no_duplicate_frames_left(self):
         keys = Counter((tuple(sorted((f.i, f.j))), f.section, f.angle) for f in self.model.frames.values())

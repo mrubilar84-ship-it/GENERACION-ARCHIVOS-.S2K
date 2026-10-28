@@ -200,8 +200,7 @@ def _is_primary(m: IfcMember) -> bool:
 def _section_parts(m: IfcMember, key: str, report: BuildReport) -> list[tuple[SectionSpec, float]] | None:
     """Secciones y ángulo local de cada barra que representa al miembro.
 
-    Un XL (dos ángulos en cruz) se modela como dos barras de ángulo sobre los mismos nudos, cada una con
-    su orientación; así SAP la dibuja como dos L y no como una plancha.
+    Un XL se representa con una sola barra L (la primera de sus dos ángulos), para evitar la L duplicada.
     """
     if m.designation and family_of(m.designation) == "XL" and m.profile is not None \
             and m.profile.kind == "contorno" and len(m.profile.rings) == 2:
@@ -214,23 +213,17 @@ def _section_parts(m: IfcMember, key: str, report: BuildReport) -> list[tuple[Se
 
 def _xl_angles(m: IfcMember) -> list[tuple[SectionSpec, float]] | None:
     """Cada contorno de la XL es un ángulo; el segundo gira respecto del primero según su vértice principal."""
-    parts: list[tuple[SectionSpec, float]] = []
-    specs: dict[str, SectionSpec] = {}  # dos ángulos iguales comparten la misma sección
-    ref = _corner_angle(m.profile.rings[0])
-    for ring in m.profile.rings:
-        dims = _try_angle([ring])
-        if dims is None:
-            return None
-        height, width, t = dims
-        name = f"L{height * 1000:.0f}x{width * 1000:.0f}x{t * 1000:.0f}"
-        if name not in specs:
-            specs[name] = angle_section(name, height, width, t, designation=name)
-            specs[name].material = DEFAULT_MATERIAL
-        parts.append((specs[name], round((_corner_angle(ring) - ref) % 360, 1)))
-    total = sum((s.dims["t3"] + s.dims["t2"] - s.dims["tf"]) * s.dims["tf"] * STEEL_KG_PER_M3 for s, _ in parts)
-    if m.kg_per_m and abs(total - m.kg_per_m) / m.kg_per_m > 0.01:
-        parts[0][0].warnings.append(f"XL: peso de los dos ángulos {total:.2f} kg/m vs designación {m.kg_per_m} kg/m")
-    return parts
+    height, width, t = _try_angle([m.profile.rings[0]]) or (None, None, None)
+    if height is None:
+        return None
+    name = f"L{height * 1000:.0f}x{width * 1000:.0f}x{t * 1000:.0f}"
+    spec = angle_section(name, height, width, t, designation=name)
+    spec.material = DEFAULT_MATERIAL
+    weight = (height + width - t) * t * STEEL_KG_PER_M3
+    if m.kg_per_m and abs(weight - m.kg_per_m) / m.kg_per_m > 0.01:
+        spec.warnings.append(
+            f"XL representada como una sola L: {weight:.2f} kg/m vs designación XL {m.kg_per_m} kg/m")
+    return [(spec, 0.0)]
 
 
 def _corner_angle(ring) -> float:

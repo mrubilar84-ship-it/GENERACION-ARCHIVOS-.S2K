@@ -34,8 +34,8 @@ El comando devuelve código 1 si hay errores de conectividad.
    Para columnas sin eje declarado usa la envolvente del sólido (aproximado, se reporta).
 2. **Secciones** (`s2k/sections.py`):
    - Perfiles I desde el IFC, o ajustados desde el contorno cuando la familia es HN, IN o IE.
-   - Ángulos L por geometría. Una XL (dos ángulos en cruz) se modela como dos barras L sobre los mismos
-     nudos, la segunda girada 180° en su eje local.
+   - Ángulos L por geometría. Una XL se representa con una sola barra L80×80×5 (el reporte advierte que
+     su peso es la mitad de la designación XL).
    - Resto como `General`.
    - Cada sección se compara con el peso de su designación (±1 %).
 3. **Grilla** (`s2k/grid.py`): las líneas X, Y y niveles Z se detectan agrupando los extremos de las piezas
@@ -78,9 +78,9 @@ S2K_TEST_IFC=/ruta/archivo.ifc python -m unittest discover -s tests -t .   # inc
 - **Columnas**: sin eje en el IFC de referencia; se usa la envolvente del sólido. El extremo puede quedar
   afectado por placas de base y de cabeza.
 - **Ángulos L**: el espesor sale del área del contorno (5,87 mm frente a 6 mm nominal por redondeo de esquinas).
-- **XL**: los dos ángulos quedan sobre el mismo eje. En el IFC están desplazados ±3,6 cm del eje, y ese
-  desplazamiento no se modela; el dibujo mostrará dos L superpuestas, no la excentricidad del IFC. La
-  orientación absoluta del primer ángulo es arbitraria; la relativa (180°) sí viene del archivo.
+- **XL**: se usa una sola L, así que el peso y la rigidez son la mitad de la XL real (5,95 frente a 11,92 kg/m).
+  Si necesitas la pareja completa, hay que decidir entre duplicar el área de la L o usar una sección
+  de dos ángulos en SAP; eso no se ha implementado.
 - **Secciones `General`**: propiedades aproximadas (torsión por pared delgada, ejes principales sin rotación
   respecto a los locales). Validar antes de usar en diseño.
 - **Materiales**: todo se asigna a A36, aunque el IFC trae `Metal - Steel 43-275`.
