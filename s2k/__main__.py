@@ -25,7 +25,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--snap-frame", type=float, default=0.02,
                    help="distancia para ajustar un nudo sobre el eje de otra barra, m (default 0.02)")
     p.add_argument("--grid-step", type=float, default=0.10,
-                   help="paso de la grilla en planta, m; cada espaciamiento se redondea a este paso (0 = sin grilla)")
+                   help="paso para detectar la grilla en planta, m; solo informativo salvo --apply-grid (0 = no detectar)")
+    p.add_argument("--apply-grid", action="store_true",
+                   help="lleva los extremos de piezas primarias a la grilla regular (por defecto no se ajusta)")
     p.add_argument("--z-step", type=float, default=0.05, help="paso de los niveles Z, m (default 0.05)")
     p.add_argument("--grid-tol", type=float, default=0.10, help="distancia máxima para ajustar a la grilla en planta, m")
     p.add_argument("--z-tol", type=float, default=0.10, help="distancia máxima para ajustar a un nivel, m")
@@ -39,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
         str(ifc_path), angle_deg=args.angle, offset=tuple(args.offset) if args.offset else None,
         z0=args.z0, snap_tol=args.snap, near_tol=args.near, join_radius=args.join, frame_tol=args.snap_frame,
         grid_step=args.grid_step or None, z_step=args.z_step, grid_tol=args.grid_tol, z_tol=args.z_tol,
+        apply_grid=args.apply_grid,
         title=ifc_path.name,
     )
     write(model, out)

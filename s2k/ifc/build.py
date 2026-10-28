@@ -91,6 +91,7 @@ class BuildReport:
                     f"- Cota Z = 0: {t.z0:.3f} m (coordenada mundo)", ""]
         if self.grid is not None:
             out += ["## Grilla regular", ""]
+            out += ["Solo informativa: las coordenadas NO se ajustan a la grilla (usar --apply-grid para ajustar).", ""]
             out += [f"Paso en planta: {self.grid.step_xy} m; paso en Z: {self.grid.step_z} m. "
                     f"Tolerancia de ajuste: {self.grid.tol_xy} m en planta, {self.grid.tol_z} m en Z.", ""]
             out += ["| Eje | Medido (m) | Regular (m) | Diferencia (mm) | Extremos que la respaldan |",
@@ -136,7 +137,7 @@ def build(path: str, *, angle_deg: float | None = None, offset: tuple[float, flo
           z0: float | None = None, snap_tol: float = 0.01, near_tol: float = 0.10,
           join_radius: float = 0.15, frame_tol: float = 0.02,
           grid_step: float | None = 0.10, z_step: float = 0.05, grid_tol: float = 0.10,
-          z_tol: float = 0.10, title: str | None = None) -> tuple[Model, BuildReport]:
+          z_tol: float = 0.10, apply_grid: bool = False, title: str | None = None) -> tuple[Model, BuildReport]:
     members, info = read_members(path)
     report = BuildReport(source=title or path, info=info, members=len(members))
     report.materials_in_ifc.update(m.material or "" for m in members)
@@ -155,14 +156,15 @@ def build(path: str, *, angle_deg: float | None = None, offset: tuple[float, flo
         # La grilla sale de piezas primarias (HN, IN, IE); los arriostramientos no definen ejes.
         points = [p for m, seg in zip(members, segments) if _is_primary(m) for p in seg]
         grid = detect_grid(points, grid_step, z_step, tol_xy=grid_tol, tol_z=z_tol)
-        stats = SnapStats()
-        # Solo piezas primarias se llevan a la grilla; riostras y cartelas conservan su geometría del IFC.
-        segments = [
-            (snap_point(a, grid, stats), snap_point(b, grid, stats)) if _is_primary(m) else (a, b)
-            for m, (a, b) in zip(members, segments)
-        ]
         report.grid = grid
-        report.grid_stats = stats
+        if apply_grid:
+            # Solo piezas primarias se llevan a la grilla; riostras y cartelas conservan su geometría del IFC.
+            stats = SnapStats()
+            segments = [
+                (snap_point(a, grid, stats), snap_point(b, grid, stats)) if _is_primary(m) else (a, b)
+                for m, (a, b) in zip(members, segments)
+            ]
+            report.grid_stats = stats
 
     model = Model(snap_tol=snap_tol, near_tol=near_tol)
     parts_by_key: dict[str, list[tuple[SectionSpec, float]] | None] = {}

@@ -42,6 +42,11 @@ class CmzIfcTests(unittest.TestCase):
         errors = [i for i in self.report.issues if i.severity == "error"]
         self.assertTrue(all(i.code == "COMPONENTES_SEPARADOS" for i in errors), errors)
 
+    def test_geometry_is_not_forced_to_grid_by_default(self):
+        zs = {round(z, 3) for _, _, z in self.model.nodes.values()}
+        self.assertTrue(any(abs(z - 7.918) < 0.005 for z in zs), "la cota medida de la cubierta debe conservarse")
+        self.assertFalse(any(abs(z - 7.9) < 1e-6 for z in zs), "no debe aplicarse la cota regular 7,90")
+
     def test_regular_grid_is_detected(self):
         xs = [a.value for a in self.report.grid.x]
         ys = [a.value for a in self.report.grid.y]

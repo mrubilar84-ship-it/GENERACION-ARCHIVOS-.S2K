@@ -21,7 +21,8 @@ Opciones principales:
 | `--snap-frame` | 0,02 m | Distancia para llevar un nudo al eje de otra barra. |
 | `--join` | 0,15 m | Alcance para conectar un extremo libre (más la semialtura de la pieza receptora). |
 | `--near` | 0,10 m | Distancia para avisar nudos cercanos sin fusionar. |
-| `--grid-step` | 0,10 m | Paso de la grilla en planta; cada espaciamiento se redondea a este paso. `0` desactiva la grilla. |
+| `--grid-step` | 0,10 m | Paso para detectar la grilla en planta (solo informativa). `0` no la detecta. |
+| `--apply-grid` | desactivado | Lleva los extremos de piezas primarias a la grilla. Por defecto la geometría queda como en el IFC. |
 | `--z-step` | 0,05 m | Paso de los niveles Z. |
 | `--grid-tol` | 0,10 m | Distancia máxima para ajustar un extremo a una línea de grilla (planta). |
 | `--z-tol` | 0,10 m | Distancia máxima para ajustar un extremo a un nivel. |
@@ -39,9 +40,10 @@ El comando devuelve código 1 si hay errores de conectividad.
    - Resto como `General`.
    - Cada sección se compara con el peso de su designación (±1 %).
 3. **Grilla** (`s2k/grid.py`): las líneas X, Y y niveles Z se detectan agrupando los extremos de las piezas
-   primarias (HN, IN, IE; los arriostramientos no definen ejes). Cada espaciamiento medido se redondea al
-   paso (p. ej. 5,05 → 5,10 con paso 0,10) y los extremos a menos de la tolerancia se llevan a la línea regular.
-   Una línea necesita al menos 4 extremos de apoyo.
+   primarias (HN, IN, IE; los arriostramientos no definen ejes) y se muestran en el reporte. Por defecto **no se
+   aplican**: la geometría del `.s2k` es la del IFC, con sus cotas y pendientes reales. Con `--apply-grid` los
+   extremos de piezas primarias se llevan a la línea regular (cada espaciamiento redondeado al paso), lo que
+   puede aplanar pendientes, como ocurrió con la cubierta del pipe rack a 7,90 m.
 4. **Nudos** (`s2k/model.py`):
    - Fusión de nudos a menos de la tolerancia.
    - Extremos libres llevados al eje de otra barra no paralela.
