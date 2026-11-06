@@ -55,7 +55,7 @@ def read_members(path: str) -> tuple[list[IfcMember], dict]:
 
     members: list[IfcMember] = []
     profile_cache: dict[str, IfcProfile | None] = {}
-    for e in f.by_type("IfcBeam") + f.by_type("IfcColumn"):
+    for e in f.by_type("IfcBeam") + f.by_type("IfcColumn") + f.by_type("IfcMember"):
         ty = ue.get_type(e)
         type_name = ty.Name if ty else (e.ObjectType or e.Name or "")
         shape = ifcopenshell.geom.create_shape(settings, e)
@@ -81,7 +81,7 @@ def read_members(path: str) -> tuple[list[IfcMember], dict]:
             profile=profile_cache[type_name], material=mat.Name if mat and hasattr(mat, "Name") else None,
         ))
     info = dict(length_scale=length_scale, ifc_schema=f.schema,
-                classes={c: sum(m.ifc_class == c for m in members) for c in ("IfcBeam", "IfcColumn")},
+                classes={c: sum(m.ifc_class == c for m in members) for c in ("IfcBeam", "IfcColumn", "IfcMember")},
                 axis_sources=dict(Counter(m.axis_source for m in members)))
     return members, info
 

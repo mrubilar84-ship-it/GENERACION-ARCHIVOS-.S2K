@@ -22,7 +22,7 @@ class CmzIfcTests(unittest.TestCase):
         cls.model, cls.report = build(IFC)
 
     def test_member_counts(self):
-        self.assertEqual(self.report.info["classes"], {"IfcBeam": 80, "IfcColumn": 14})
+        self.assertEqual(self.report.info["classes"], {"IfcBeam": 80, "IfcColumn": 14, "IfcMember": 0})
 
     def test_sections_match_designations(self):
         names = set(self.report.sections)
