@@ -14,6 +14,7 @@ import math
 from collections import Counter
 from dataclasses import dataclass, field
 
+from .. import continuity
 from ..grid import Grid, SnapStats, detect_grid, snap_point
 from ..model import Issue, Model
 from ..sections import (
@@ -62,6 +63,9 @@ class BuildReport:
     duplicates_removed: list[str] = field(default_factory=list)
     grid: Grid | None = None
     grid_stats: SnapStats | None = None
+    fused_pairs: int = 0
+    max_fuse_move: float = 0.0
+    plan: object | None = None  # continuity.Plan: barras continuas, liberaciones y apoyos provisorios
     max_snap_move: float = 0.0
     skipped: list[str] = field(default_factory=list)
     sections: dict[str, SectionSpec] = field(default_factory=dict)
@@ -89,6 +93,20 @@ class BuildReport:
                     f"- Rotación de la grilla: {t.angle_deg:.3f}°",
                     f"- Traslación (ejes rotados): x={t.offset[0]:.3f} m, y={t.offset[1]:.3f} m",
                     f"- Cota Z = 0: {t.z0:.3f} m (coordenada mundo)", ""]
+        if self.plan is not None:
+            pl = self.plan
+            long_bars = sum(1 for of in pl.frames if len(of.segments) > 1)
+            out += ["## Continuidad y estabilidad", ""]
+            out += [f"- Barras continuas en el .s2k: {len(pl.frames)} (de {self.frames} tramos; "
+                    f"{long_bars} se unen en barras continuas)",
+                    f"- Extremos candidatos a liberación de momento: {pl.candidates}; liberados: {pl.releases_applied}",
+                    f"- Modos de mecanismo con todo rígido: {pl.mechanisms_rigid}; "
+                    f"con las liberaciones aplicadas: {pl.mechanisms_final}",
+                    f"- Apoyos provisorios (base de columnas, por confirmar): {len(pl.supports)}"]
+            out += [f"- {n}" for n in pl.notes]
+            out += [f"- Uniones casi cerradas fundidas: {self.fused_pairs} "
+                    f"(desplazamiento máximo {self.max_fuse_move * 1000:.1f} mm por extremo)"]
+            out += [""]
         if self.grid is not None:
             out += ["## Grilla regular", ""]
             out += ["Solo informativa: las coordenadas NO se ajustan a la grilla (usar --apply-grid para ajustar).", ""]
@@ -137,7 +155,8 @@ def build(path: str, *, angle_deg: float | None = None, offset: tuple[float, flo
           z0: float | None = None, snap_tol: float = 0.01, near_tol: float = 0.10,
           join_radius: float = 0.15, frame_tol: float = 0.02,
           grid_step: float | None = 0.10, z_step: float = 0.05, grid_tol: float = 0.10,
-          z_tol: float = 0.10, apply_grid: bool = False, title: str | None = None) -> tuple[Model, BuildReport]:
+          z_tol: float = 0.10, apply_grid: bool = False, releases: bool = True,
+          fuse_tol: float = 0.10, title: str | None = None) -> tuple[Model, BuildReport]:
     members, info = read_members(path)
     report = BuildReport(source=title or path, info=info, members=len(members))
     report.materials_in_ifc.update(m.material or "" for m in members)
@@ -187,6 +206,9 @@ def build(path: str, *, angle_deg: float | None = None, offset: tuple[float, flo
     report.joined_ends, report.max_join_move = model.attach_free_ends(join_radius)
     report.snapped_nodes, report.max_snap_move = model.snap_nodes_to_frames(frame_tol)
     report.duplicates_removed = model.remove_duplicate_frames()
+    report.fused_pairs, report.max_fuse_move = model.fuse_near(fuse_tol) if fuse_tol else (0, 0.0)
+    if releases:
+        report.plan = continuity.plan(model, releases=True)
     report.frames = len(model.frames)
     report.nodes = len(model.nodes)
     report.issues = model.checks()

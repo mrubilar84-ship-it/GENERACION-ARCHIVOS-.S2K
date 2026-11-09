@@ -197,6 +197,33 @@ class Model:
             self._renumber()
         return removed
 
+    def fuse_near(self, tol: float) -> tuple[int, float]:
+        """Cierra uniones casi cerradas: dos nudos a menos de `tol` se llevan a su punto medio.
+
+        Sirve para riostras que quedan a 2–10 cm de su nudo. Quita barras de longitud cero y
+        duplicadas, y divide barras en los nudos resultantes. Devuelve (pares fundidos, desplazamiento máximo m).
+        """
+        pairs, max_move = 0, 0.0
+        ids = sorted(self.nodes)
+        for x, a in enumerate(ids):
+            for b in ids[x + 1:]:
+                if a not in self.nodes or b not in self.nodes:
+                    continue
+                pa, pb = self.nodes[a], self.nodes[b]
+                d = math.dist(pa, pb)
+                if 0 < d <= tol:
+                    mid = tuple((pa[k] + pb[k]) / 2 for k in range(3))
+                    max_move = max(max_move, d / 2)
+                    self.nodes[a] = mid
+                    self.nodes[b] = mid
+                    pairs += 1
+        if pairs:
+            self._merge_coincident()
+            self.frames = {l: f for l, f in self.frames.items() if f.i != f.j}
+            self.split_at_nodes()
+            self.remove_duplicate_frames()  # después de dividir: la división puede repetir una barra
+        return pairs, max_move
+
     def _merge_coincident(self) -> None:
         """Une nudos a menos de snap_tol: reasigna las barras al de menor id."""
         keep: dict[int, int] = {}

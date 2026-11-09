@@ -45,7 +45,7 @@ def _table(name: str, rows: list[str]) -> list[str]:
     return [f'TABLE:  "{name}"', *rows, " "]
 
 
-def render(model: Model, title: str = "generado desde IFC con s2k") -> str:
+def render(model: Model, title: str = "generado desde IFC con s2k", plan=None) -> str:
     """Contenido .s2k del modelo (CRLF)."""
     lines: list[str] = [f"File {title}", " "]
     used_materials = sorted({s.material for s in model.sections.values()} or {"A36"})
@@ -86,34 +86,54 @@ def render(model: Model, title: str = "generado desde IFC con s2k") -> str:
         section_rows.append(_rec(**kw))
     lines += _table("FRAME SECTION PROPERTIES 01 - GENERAL", section_rows)
 
+    ends = plan.chain_ends if plan is not None else None
     lines += _table("JOINT COORDINATES", [
-        _rec(Joint=n, CoordSys="GLOBAL", CoordType="Cartesian", XorR=x, Y=y, Z=z, SpecialJt=False,
+        _rec(Joint=n, CoordSys="GLOBAL", CoordType="Cartesian", XorR=x, Y=y, Z=z,
+             SpecialJt=(ends is not None and n not in ends),
              GlobalX=x, GlobalY=y, GlobalZ=z)
         for n, (x, y, z) in model.nodes.items()])
 
-    conn, assign = [], []
-    for label, f in model.frames.items():
-        a, b = model.nodes[f.i], model.nodes[f.j]
-        conn.append(_rec(Frame=label, JointI=f.i, JointJ=f.j, IsCurved=False, Length=math.dist(a, b),
+    frames = _output_frames(model, plan)
+    conn, assign, axes, mesh, release = [], [], [], [], []
+    for label, i, j, sec, angle, rel in frames:
+        a, b = model.nodes[i], model.nodes[j]
+        conn.append(_rec(Frame=label, JointI=i, JointJ=j, IsCurved=False, Length=math.dist(a, b),
                          CentroidX=(a[0] + b[0]) / 2, CentroidY=(a[1] + b[1]) / 2, CentroidZ=(a[2] + b[2]) / 2))
-        shape = model.sections[f.section].shape
-        assign.append(_rec(Frame=label, SectionType=shape, AutoSelect="N.A.", AnalSect=f.section,
-                           DesignSect=f.section, MatProp="Default"))
+        assign.append(_rec(Frame=label, SectionType=model.sections[sec].shape, AutoSelect="N.A.", AnalSect=sec,
+                           DesignSect=sec, MatProp="Default"))
+        if angle:
+            axes.append(_rec(Frame=label, Angle=angle, AdvanceAxes=False))
+        if plan is not None:
+            mesh.append(_rec(Frame=label, AutoMesh=True, AtJoints=True, AtFrames=False))
+            if rel.get("i") or rel.get("j"):
+                ri, rj = rel.get("i", set()), rel.get("j", set())
+                release.append(_rec(Frame=label, PI=False, V2I=False, V3I=False, TI=3 in ri, M2I=4 in ri, M3I=5 in ri,
+                                    PJ=False, V2J=False, V3J=False, TJ=3 in rj, M2J=4 in rj, M3J=5 in rj, PartialFix=False))
     lines += _table("CONNECTIVITY - FRAME", conn)
     lines += _table("FRAME SECTION ASSIGNMENTS", assign)
-    lines += _table("FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL", [
-        _rec(Frame=label, Angle=f.angle, AdvanceAxes=False)
-        for label, f in model.frames.items() if f.angle])
+    lines += _table("FRAME LOCAL AXES ASSIGNMENTS 1 - TYPICAL", axes)
+    lines += _table("FRAME AUTO MESH ASSIGNMENTS", mesh)
+    lines += _table("FRAME RELEASE ASSIGNMENTS 1 - GENERAL", release)
 
+    restrained = plan.supports if plan is not None else list(model.restraints)
     lines += _table("JOINT RESTRAINT ASSIGNMENTS", [
+        _rec(Joint=n, U1=True, U2=True, U3=True, R1=True, R2=True, R3=True) for n in restrained]
+        if plan is not None else [
         _rec(Joint=n, **{d: bool(v) for d, v in zip(DOFS, dofs)}) for n, dofs in model.restraints.items()])
 
     lines.append("END TABLE DATA")
     return "\r\n".join(lines) + "\r\n"
 
 
-def write(model: Model, path: str | Path, title: str | None = None) -> Path:
+def _output_frames(model: Model, plan):
+    """Barras a escribir: tramos del modelo, o barras continuas del plan (con liberaciones)."""
+    if plan is None:
+        return [(label, f.i, f.j, f.section, f.angle, {}) for label, f in model.frames.items()]
+    return [(of.label, of.i, of.j, of.section, of.angle, of.releases) for of in plan.frames]
+
+
+def write(model: Model, path: str | Path, title: str | None = None, plan=None) -> Path:
     path = Path(path)
-    text = render(model, title or path.name)
+    text = render(model, title or path.name, plan)
     path.write_bytes(text.encode("utf-8"))
     return path

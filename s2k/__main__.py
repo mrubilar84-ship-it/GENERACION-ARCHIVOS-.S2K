@@ -26,6 +26,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="distancia para ajustar un nudo sobre el eje de otra barra, m (default 0.02)")
     p.add_argument("--grid-step", type=float, default=0.10,
                    help="paso para detectar la grilla en planta, m; solo informativo salvo --apply-grid (0 = no detectar)")
+    p.add_argument("--fuse", type=float, default=0.10,
+                   help="funde nudos casi coincidentes a menos de esta distancia, m (0 = no; default 0.10)")
+    p.add_argument("--no-releases", action="store_true",
+                   help="no libera momentos ni une barras continuas (modelo totalmente rígido, como antes)")
     p.add_argument("--apply-grid", action="store_true",
                    help="lleva los extremos de piezas primarias a la grilla regular (por defecto no se ajusta)")
     p.add_argument("--z-step", type=float, default=0.05, help="paso de los niveles Z, m (default 0.05)")
@@ -41,10 +45,10 @@ def main(argv: list[str] | None = None) -> int:
         str(ifc_path), angle_deg=args.angle, offset=tuple(args.offset) if args.offset else None,
         z0=args.z0, snap_tol=args.snap, near_tol=args.near, join_radius=args.join, frame_tol=args.snap_frame,
         grid_step=args.grid_step or None, z_step=args.z_step, grid_tol=args.grid_tol, z_tol=args.z_tol,
-        apply_grid=args.apply_grid,
+        apply_grid=args.apply_grid, releases=not args.no_releases, fuse_tol=args.fuse,
         title=ifc_path.name,
     )
-    write(model, out)
+    write(model, out, plan=report.plan)
     report_path.write_text(report.to_markdown(), encoding="utf-8")
 
     errors = [i for i in report.issues if i.severity == "error"]

@@ -22,6 +22,8 @@ Opciones principales:
 | `--join` | 0,15 m | Alcance para conectar un extremo libre (más la semialtura de la pieza receptora). |
 | `--near` | 0,10 m | Distancia para avisar nudos cercanos sin fusionar. |
 | `--grid-step` | 0,10 m | Paso para detectar la grilla en planta (solo informativa). `0` no la detecta. |
+| `--fuse` | 0,10 m | Funde nudos casi coincidentes (riostras a 2–10 cm de su nudo) llevándolos al punto medio. `0` lo desactiva. |
+| `--no-releases` | desactivado | No libera momentos ni une barras continuas: modelo totalmente rígido (como antes). |
 | `--apply-grid` | desactivado | Lleva los extremos de piezas primarias a la grilla. Por defecto la geometría queda como en el IFC. |
 | `--z-step` | 0,05 m | Paso de los niveles Z. |
 | `--grid-tol` | 0,10 m | Distancia máxima para ajustar un extremo a una línea de grilla (planta). |
@@ -44,14 +46,24 @@ El comando devuelve código 1 si hay errores de conectividad.
    aplican**: la geometría del `.s2k` es la del IFC, con sus cotas y pendientes reales. Con `--apply-grid` los
    extremos de piezas primarias se llevan a la línea regular (cada espaciamiento redondeado al paso), lo que
    puede aplanar pendientes, como ocurrió con la cubierta del pipe rack a 7,90 m.
-4. **Nudos** (`s2k/model.py`):
+4. **Continuidad y liberaciones** (`s2k/continuity.py`, `s2k/stability.py`):
+   - Los tramos colineales de la misma sección y ángulo se escriben como una sola barra continua; SAP corta
+     en los nudos con `FRAME AUTO MESH` (`AtJoints=Yes`, `AtFrames=No`). Los nudos que no son extremo de barra
+     van con `SpecialJt=Yes`.
+   - Columnas verticales: continuas, sin liberaciones.
+   - Vigas, arriostramientos y demás: M2 y M3 liberados en el extremo, y la torsión solo en el extremo I. Una
+     liberación se acepta solo si no agrega mecanismos respecto al modelo rígido (chequeo propio de rigidez,
+     sin SAP).
+   - Apoyos provisorios en la base de cada columna; hay que confirmarlos.
+   - El reporte muestra mecanismos antes y después de liberar.
+5. **Nudos** (`s2k/model.py`):
    - Fusión de nudos a menos de la tolerancia.
    - Extremos libres llevados al eje de otra barra no paralela.
    - Nudos a 2 cm del eje de otra barra movidos sobre ese eje.
    - Barras divididas en nudos interiores (p. ej. viga que pasa por una columna).
    - Barras duplicadas eliminadas.
-5. **Revisiones** (reporte): nudos desconectados, componentes separadas, barras que se cruzan sin nudo, nudos cercanos sin fusionar, barras duplicadas y de longitud cero, apoyos inválidos.
-6. **Escritura** (`s2k/writer.py`): CRLF, tablas con el formato verificado en archivos exportados por SAP2000 v23.3.1.
+6. **Revisiones** (reporte): nudos desconectados, componentes separadas, barras que se cruzan sin nudo, nudos cercanos sin fusionar, barras duplicadas y de longitud cero, apoyos inválidos.
+7. **Escritura** (`s2k/writer.py`): CRLF, tablas con el formato verificado en archivos exportados por SAP2000 v23.3.1.
 
 ## Resultado con el IFC de referencia (CMZ-5746)
 
@@ -88,6 +100,9 @@ S2K_TEST_IFC=/ruta/archivo.ifc python -m unittest discover -s tests -t .   # inc
 - **Materiales**: todo se asigna a A36, aunque el IFC trae `Metal - Steel 43-275`.
 - **Apoyos**: no se asignan; el reporte lista los nudos de cota mínima como candidatos.
 - **Cargas**: no se generan todavía.
+- **Mecanismos**: con el IFC de referencia quedan 14 modos de mecanismo aun con uniones casi cerradas: 6 son de
+  la viga aislada y 8 de extremos abiertos (4 en z = 0, donde deberían bajar las columnas que Revit no
+  exportó). El reporte los cuenta; hay que resolverlos en Revit o confirmándolos en SAP.
 - **Coordenadas**: se rota la grilla por la moda de las vigas horizontales; conviene confirmar el origen y la rotación.
 - **Grilla**: se deduce de la estructura, no de un plano. Confirma los espaciamientos contra las cotas del plano;
   el origen queda en la primera línea detectada (aquí Y = 0,02 m pasa a 0,00 m).
